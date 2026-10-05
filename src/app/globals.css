@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  /* Anli brand — orange on dark charcoal */
+  --color-brand-50: #fff5ed;
+  --color-brand-100: #ffe8d5;
+  --color-brand-200: #fdcfab;
+  --color-brand-300: #fbad74;
+  --color-brand-400: #f8813c;
+  --color-brand-500: #f56116;
+  --color-brand-600: #e64a0c;
+  --color-brand-700: #bf360c;
+  --color-brand-800: #982c11;
+  --color-brand-900: #7a2712;
+
+  /* Charcoal surfaces */
+  --color-ink-950: #12100d;
+  --color-ink-900: #1a1714;
+  --color-ink-850: #201c18;
+  --color-ink-800: #26211c;
+  --color-ink-700: #332d26;
+  --color-ink-600: #4a4238;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+html {
+  background: var(--color-ink-950);
+}
+
+body {
+  background: var(--color-ink-950);
+  color: #f5f0ea;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Subtle scrollbar for slot rails */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
