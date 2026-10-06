@@ -1,14 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { RESTAURANTS } from "@/lib/data";
+import { useEffect, useMemo, useState } from "react";
+import { fetchRestaurants } from "@/lib/api";
+import type { Restaurant } from "@/lib/types";
 import { RestaurantCard } from "@/components/RestaurantCard";
 import { track } from "@/lib/analytics";
 
 const CUISINES = ["All", "Nigerian", "Seafood", "Asian", "Italian", "Café", "Grill", "Turkish"];
 const CITIES = ["All cities", "Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"];
 
-function matchesCuisine(r: (typeof RESTAURANTS)[number], c: string): boolean {
+function matchesCuisine(r: Restaurant, c: string): boolean {
   if (c === "All") return true;
   const hay = `${r.cuisine} ${r.tags.join(" ")}`.toLowerCase();
   return hay.includes(c.toLowerCase());
@@ -18,10 +19,27 @@ export default function DiscoverPage() {
   const [query, setQuery] = useState("");
   const [cuisine, setCuisine] = useState("All");
   const [city, setCity] = useState("All cities");
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // FR-01: directory listing — live API when configured, mock fallback.
+  useEffect(() => {
+    let cancelled = false;
+    fetchRestaurants()
+      .then((list) => {
+        if (!cancelled) setRestaurants(list);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return RESTAURANTS.filter(
+    return restaurants.filter(
       (r) =>
         (city === "All cities" || r.city === city) &&
         matchesCuisine(r, cuisine) &&
@@ -30,7 +48,7 @@ export default function DiscoverPage() {
             .toLowerCase()
             .includes(q)),
     );
-  }, [query, cuisine, city]);
+  }, [restaurants, query, cuisine, city]);
 
   return (
     <div className="px-4 pt-5">
@@ -88,7 +106,11 @@ export default function DiscoverPage() {
 
       {/* Results — FR-01 */}
       <div className="mt-5 flex flex-col gap-4">
-        {results.length === 0 ? (
+        {loading ? (
+          <div className="rounded-3xl border border-ink-800 bg-ink-900 px-6 py-12 text-center">
+            <p className="text-[14px] text-stone-500">Finding spots…</p>
+          </div>
+        ) : results.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-ink-600 bg-ink-900 px-6 py-12 text-center">
             <p className="text-3xl" aria-hidden>🍽️</p>
             <p className="mt-3 font-bold text-stone-200">No matches found</p>

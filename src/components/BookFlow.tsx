@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  getAvailability,
-  holdSlot,
-  confirmReservation,
-} from "@/lib/data";
+  fetchAvailability,
+  createHold,
+  confirmHold,
+} from "@/lib/api";
 import {
   formatDate,
   formatDateShort,
@@ -34,10 +34,24 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
   const [secondsLeft, setSecondsLeft] = useState(5 * 60);
 
   const days = useMemo(() => nextDays(14), []);
-  const slots = useMemo(
-    () => getAvailability(restaurant.id, date, party),
-    [restaurant.id, date, party],
-  );
+  const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(true);
+
+  // FR-03/FR-04: live availability from the ops backend (mock fallback).
+  useEffect(() => {
+    let cancelled = false;
+    setSlotsLoading(true);
+    fetchAvailability(restaurant, date, party)
+      .then((s) => {
+        if (!cancelled) setSlots(s);
+      })
+      .finally(() => {
+        if (!cancelled) setSlotsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurant, date, party]);
 
   // FR-05: hold countdown; release on expiry
   useEffect(() => {
@@ -55,31 +69,42 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
   const ss = String(secondsLeft % 60).padStart(2, "0");
 
-  function startHold() {
+  const [holding, setHolding] = useState(false);
+
+  async function startHold() {
     const e: typeof errors = {};
     if (name.trim().length < 2) e.name = "Please enter your name.";
     if (contact.replace(/\D/g, "").length < 7)
       e.contact = "Enter a valid phone number or email.";
     setErrors(e);
     if (Object.keys(e).length > 0 || !slot) return;
-    const res = holdSlot({
-      restaurantId: restaurant.id,
-      dinerName: name.trim(),
-      dinerContact: contact.trim(),
-      date,
-      time: slot.time,
-      partySize: party,
-      ttlMinutes: 5,
-    });
-    setReservation(res);
-    setSecondsLeft(5 * 60);
-    setPhase("hold");
+    setHolding(true);
+    try {
+      // FR-05: hold the slot server-side (5-min TTL), mock fallback.
+      const res = await createHold(restaurant, {
+        dinerName: name.trim(),
+        dinerContact: contact.trim(),
+        date,
+        time: slot.time,
+        partySize: party,
+      });
+      setReservation(res);
+      setSecondsLeft(5 * 60);
+      setPhase("hold");
+    } catch (err) {
+      setFailReason(
+        err instanceof Error ? err.message : "Couldn't hold that slot.",
+      );
+      setPhase("failed");
+    } finally {
+      setHolding(false);
+    }
   }
 
-  function confirm() {
+  async function confirm() {
     if (!reservation) return;
     // FR-06: race-safe confirm — fails gracefully if the hold expired
-    const result = confirmReservation(reservation.id);
+    const result = await confirmHold(reservation.id);
     if (result.ok) {
       setReservation(result.reservation);
       setPhase("done");
@@ -178,7 +203,11 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
           <p className="mt-6 text-[13px] font-semibold text-stone-400 uppercase tracking-wide">
             Available times · {formatDate(date)}
           </p>
-          {slots.length === 0 ? (
+          {slotsLoading ? (
+            <div className="mt-2 rounded-2xl border border-ink-800 bg-ink-900 p-6 text-center">
+              <p className="text-[14px] text-stone-500">Checking tables…</p>
+            </div>
+          ) : slots.length === 0 ? (
             <div className="mt-2 rounded-2xl border border-dashed border-ink-600 bg-ink-900 p-6 text-center">
               <p className="font-bold text-stone-200">No tables left</p>
               <p className="mt-1 text-[14px] text-stone-500">
@@ -262,8 +291,8 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
             />
           </div>
           <div className="mt-6">
-            <Button fullWidth size="lg" onClick={startHold}>
-              Hold my table →
+            <Button fullWidth size="lg" onClick={startHold} disabled={holding}>
+              {holding ? "Holding your table…" : "Hold my table →"}
             </Button>
             <p className="mt-3 text-center text-[13px] text-stone-500">
               Your slot is held for 5 minutes while you confirm.

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getRestaurant, isLiveBookable } from "@/lib/data";
+import { fetchRestaurant } from "@/lib/api";
+import { isLiveBookable } from "@/lib/data";
 import { RequestFlow } from "@/components/RequestFlow";
 
 export default async function RequestRoute({
@@ -8,7 +9,7 @@ export default async function RequestRoute({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const restaurant = getRestaurant(slug);
+  const restaurant = await fetchRestaurant(slug);
   // Path B is only for unclaimed (or not-yet-configured) restaurants
   if (!restaurant || isLiveBookable(restaurant)) notFound();
   return <RequestFlow restaurant={restaurant} />;

@@ -3,9 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  saveBookingRequest,
-  getRequestsFor,
-} from "@/lib/data";
+  createBookingRequest,
+  getLocalRequestCount,
+} from "@/lib/api";
 import { formatDate, formatDateShort, nextDays, toE164 } from "@/lib/format";
 import { track } from "@/lib/analytics";
 import { Button } from "@/components/ui/Button";
@@ -24,12 +24,14 @@ export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
   const [errors, setErrors] = useState<{ name?: string; contact?: string }>({});
   const [saved, setSaved] = useState<BookingRequest | null>(null);
   const [phase, setPhase] = useState<Phase>("form");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const days = nextDays(14);
   const times = ["12:00", "13:00", "14:00", "18:00", "19:00", "20:00", "21:00"];
-  const demandCount = getRequestsFor(restaurant.id).length;
+  const demandCount = getLocalRequestCount(restaurant.id);
 
-  function submit() {
+  async function submit() {
     const e: typeof errors = {};
     if (name.trim().length < 2) e.name = "Please enter your name.";
     if (contact.replace(/\D/g, "").length < 7)
@@ -37,21 +39,31 @@ export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
     setErrors(e);
     if (Object.keys(e).length > 0) return;
 
-    const req = saveBookingRequest({
-      restaurantId: restaurant.id,
-      dinerName: name.trim(),
-      dinerContact: contact.trim(),
-      requestedAt: `${date}T${time}:00`,
-      partySize: party,
-    });
-    setSaved(req);
-    setPhase("done");
-    // FR-11: logged for the Sales/Growth pipeline; FR-12: restaurant notified
-    track("booking_request_submitted", {
-      restaurant_id: restaurant.id,
-      datetime: `${date} ${time}`,
-      party_size: party,
-    });
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      // FR-08–FR-11: Path B request — live API when configured, mock fallback.
+      const req = await createBookingRequest(restaurant, {
+        dinerName: name.trim(),
+        dinerContact: contact.trim(),
+        requestedAt: `${date}T${time}:00`,
+        partySize: party,
+      });
+      setSaved(req);
+      setPhase("done");
+      // FR-11: logged for the Sales/Growth pipeline; FR-12: restaurant notified
+      track("booking_request_submitted", {
+        restaurant_id: restaurant.id,
+        datetime: `${date} ${time}`,
+        party_size: party,
+      });
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "Couldn't send your request.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const waNumber = restaurant.whatsapp ? toE164(restaurant.whatsapp) : null;
@@ -179,9 +191,14 @@ export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
           </div>
 
           <div className="mt-6">
-            <Button fullWidth size="lg" onClick={submit}>
-              Send booking request →
+            <Button fullWidth size="lg" onClick={submit} disabled={submitting}>
+              {submitting ? "Sending…" : "Send booking request →"}
             </Button>
+            {submitError && (
+              <p className="mt-3 text-center text-[13px] text-red-300">
+                {submitError}
+              </p>
+            )}
           </div>
         </div>
       )}

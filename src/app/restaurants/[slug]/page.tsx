@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRestaurant, isLiveBookable } from "@/lib/data";
+import { fetchRestaurant } from "@/lib/api";
+import { isLiveBookable } from "@/lib/data";
 import { formatPriceRange, priceTierSymbols } from "@/lib/format";
 import { ClaimBadge, Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,7 +12,7 @@ export default async function RestaurantPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const restaurant = getRestaurant(slug);
+  const restaurant = await fetchRestaurant(slug);
   if (!restaurant) notFound();
 
   // FR-02: claim-status check is the fork point for the booking module.
