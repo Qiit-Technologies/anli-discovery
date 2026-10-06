@@ -27,6 +27,10 @@ export interface Restaurant {
   maxPartySize: number;
   /** Accent hue index for generated cover art */
   hue: number;
+  /** True for main Anli partner restaurants (from /hotels/mobile/featured) */
+  featured?: boolean;
+  /** Cover photo URL when the backend provides one */
+  coverImage?: string;
 }
 
 export interface AvailabilitySlot {

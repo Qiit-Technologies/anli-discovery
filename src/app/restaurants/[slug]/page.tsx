@@ -21,12 +21,22 @@ export default async function RestaurantPage({
   return (
     <div>
       {/* Cover */}
-      <div
-        className="relative h-56"
-        style={{
-          background: `linear-gradient(135deg, hsl(${restaurant.hue} 45% 24%), hsl(${restaurant.hue + 40} 50% 10%))`,
-        }}
-      >
+      <div className="relative h-56 overflow-hidden">
+        {restaurant.coverImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={restaurant.coverImage}
+            alt={restaurant.name}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div
+            className="h-full w-full"
+            style={{
+              background: `linear-gradient(135deg, hsl(${restaurant.hue} 45% 24%), hsl(${restaurant.hue + 40} 50% 10%))`,
+            }}
+          />
+        )}
         <Link
           href="/"
           aria-label="Back to discovery"
@@ -35,16 +45,24 @@ export default async function RestaurantPage({
           ←
         </Link>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-7xl font-black tracking-tight text-white/15 select-none">
-            {restaurant.name
-              .split(" ")
-              .map((w) => w[0])
-              .slice(0, 2)
-              .join("")}
-          </span>
+          {!restaurant.coverImage && (
+            <span className="text-7xl font-black tracking-tight text-white/15 select-none">
+              {restaurant.name
+                .split(" ")
+                .map((w) => w[0])
+                .slice(0, 2)
+                .join("")}
+            </span>
+          )}
         </div>
         <div className="absolute bottom-4 left-4">
-          <ClaimBadge live={live} />
+          {restaurant.featured ? (
+            <span className="rounded-full bg-amber-400 px-3 py-1.5 text-[12px] font-extrabold text-ink-950">
+              ★ Featured Anli partner
+            </span>
+          ) : (
+            <ClaimBadge live={live} />
+          )}
         </div>
       </div>
 
@@ -101,9 +119,29 @@ export default async function RestaurantPage({
           </p>
         </div>
 
-        {/* Booking module — forked on claim status (FR-02, BR-01) */}
+        {/* Booking module — featured partners get a showcase panel;
+            discovery listings fork on claim status (FR-02, BR-01) */}
         <div className="mt-6 rounded-3xl border border-ink-700 bg-ink-900 p-5">
-          {live ? (
+          {restaurant.featured ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-amber-300">★</span>
+                <h2 className="text-[17px] font-bold text-white">
+                  An Anli partner restaurant
+                </h2>
+              </div>
+              <p className="mt-1.5 text-[14px] leading-6 text-stone-400">
+                {restaurant.name} runs on Anli. In-app booking for partner
+                restaurants is coming soon — for now, please contact them
+                directly to reserve a table.
+              </p>
+              {restaurant.address ? (
+                <p className="mt-3 text-[14px] font-semibold text-stone-200">
+                  📍 {restaurant.address}
+                </p>
+              ) : null}
+            </>
+          ) : live ? (
             <>
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-brand-400 animate-pulse" />

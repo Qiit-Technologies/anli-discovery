@@ -87,6 +87,19 @@ interface ApiRestaurant {
   maxPartySize: number;
 }
 
+interface ApiHotel {
+  id: number;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  country: string;
+  coverImage: string | null;
+  rating: string | number;
+  ratingCount: number;
+  services: string;
+}
+
 interface ApiAvailability {
   date: string;
   partySize: number;
@@ -190,24 +203,125 @@ function mapBookingRequest(b: ApiBookingRequest): BookingRequest {
 
 /* ---------------- public API (with mock fallback) ---------------- */
 
-/** FR-01: directory listing. Falls back to the bundled mock list. */
-export async function fetchRestaurants(): Promise<Restaurant[]> {
-  if (!apiEnabled()) return RESTAURANTS;
+/** In-memory cache of featured partners so detail pages resolve them. */
+let featuredCache: Restaurant[] | null = null;
+
+/**
+ * Featured Anli partner restaurants — GET /hotels/mobile/featured.
+ * These are main (claimed) restaurants; they render as a showcase section
+ * and resolve on detail pages via the cache. No mock fallback: an empty
+ * list simply hides the section.
+ */
+export async function fetchFeatured(): Promise<Restaurant[]> {
+  if (featuredCache) return featuredCache;
+  if (!apiEnabled()) {
+    featuredCache = [];
+    return featuredCache;
+  }
   try {
-    const list = await req<ApiRestaurant[]>(
-      `/discovery/restaurants?limit=100`,
-    );
-    return list.map(mapRestaurant);
+    const hotels = await req<ApiHotel[]>(`/hotels/mobile/featured`);
+    featuredCache = hotels.map((h) => ({
+      id: `hotel-${h.id}`,
+      slug: `hotel-${h.id}`,
+      name: h.name,
+      cuisine: "Restaurant",
+      area: h.state || "",
+      city: h.city as Restaurant["city"],
+      claimStatus: "claimed" as const,
+      opsSetupComplete: true,
+      priceTier: 2 as const,
+      priceRangeKobo: [0, 0] as [number, number],
+      rating: Number(h.rating) || 0,
+      reviewCount: h.ratingCount ?? 0,
+      address: h.address ?? "",
+      hours: "",
+      description: "",
+      tags: (h.services ?? "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+      maxPartySize: 8,
+      hue: hueFor(`hotel-${h.id}`),
+      featured: true,
+      coverImage: h.coverImage ?? undefined,
+    }));
   } catch {
-    return RESTAURANTS;
+    featuredCache = [];
+  }
+  return featuredCache;
+}
+
+export interface RestaurantFilters {
+  q?: string;
+  city?: string;
+  cuisine?: string;
+  limit?: number;
+}
+
+function filterMock(filters: RestaurantFilters): Restaurant[] {
+  const q = (filters.q ?? "").trim().toLowerCase();
+  const limit = filters.limit ?? 100;
+  return RESTAURANTS.filter((r) => {
+    if (filters.city && r.city !== filters.city) return false;
+    if (filters.cuisine && filters.cuisine !== "All") {
+      const hay = `${r.cuisine} ${r.tags.join(" ")}`.toLowerCase();
+      if (!hay.includes(filters.cuisine.toLowerCase())) return false;
+    }
+    if (
+      q &&
+      !`${r.name} ${r.cuisine} ${r.area} ${r.tags.join(" ")}`
+        .toLowerCase()
+        .includes(q)
+    )
+      return false;
+    return true;
+  }).slice(0, limit);
+}
+
+/**
+ * FR-01: directory listing with server-side search + pagination.
+ * Falls back to the bundled mock list when the API is unreachable or
+ * returns nothing for an unfiltered browse.
+ */
+export async function fetchRestaurants(
+  filters: RestaurantFilters = {},
+): Promise<Restaurant[]> {
+  if (!apiEnabled()) return filterMock(filters);
+  const params = new URLSearchParams();
+  if (filters.q) params.set("q", filters.q);
+  if (filters.city) params.set("city", filters.city);
+  if (filters.cuisine) params.set("cuisine", filters.cuisine);
+  params.set("limit", String(Math.min(100, Math.max(1, filters.limit ?? 20))));
+  const qs = params.toString();
+  try {
+    const list = await req<ApiRestaurant[]>(`/discovery/restaurants?${qs}`);
+    const mapped = list.map(mapRestaurant);
+    // Unfiltered browse against an empty table: show the bundled catalogue
+    // instead of a blank page.
+    if (
+      mapped.length === 0 &&
+      !filters.q &&
+      !filters.cuisine &&
+      !filters.city
+    ) {
+      return filterMock(filters);
+    }
+    return mapped;
+  } catch {
+    return filterMock(filters);
   }
 }
 
-/** FR-02: listing detail incl. claim status. */
+/** FR-02: listing detail incl. claim status (featured partners via cache). */
 export async function fetchRestaurant(
   slug: string,
 ): Promise<Restaurant | undefined> {
-  if (!apiEnabled()) return mockGetRestaurant(slug);
+  if (!apiEnabled()) {
+    return (
+      mockGetRestaurant(slug) ??
+      (await fetchFeatured()).find((r) => r.slug === slug)
+    );
+  }
   try {
     return mapRestaurant(
       await req<ApiRestaurant>(
@@ -215,8 +329,16 @@ export async function fetchRestaurant(
       ),
     );
   } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return undefined;
-    return mockGetRestaurant(slug);
+    if (e instanceof ApiError && e.status === 404) {
+      const featured = await fetchFeatured();
+      const hit = featured.find((r) => r.slug === slug);
+      if (hit) return hit;
+      return undefined;
+    }
+    return (
+      mockGetRestaurant(slug) ??
+      (await fetchFeatured()).find((r) => r.slug === slug)
+    );
   }
 }
 

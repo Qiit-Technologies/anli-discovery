@@ -10,7 +10,8 @@ export default async function RequestRoute({
 }) {
   const { slug } = await params;
   const restaurant = await fetchRestaurant(slug);
-  // Path B is only for unclaimed (or not-yet-configured) restaurants
-  if (!restaurant || isLiveBookable(restaurant)) notFound();
+  // Path B is only for unclaimed discovery listings (not featured partners)
+  if (!restaurant || restaurant.featured || isLiveBookable(restaurant))
+    notFound();
   return <RequestFlow restaurant={restaurant} />;
 }
