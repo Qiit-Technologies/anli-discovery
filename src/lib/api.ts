@@ -95,6 +95,8 @@ interface ApiHotel {
   state: string;
   country: string;
   coverImage: string | null;
+  images?: string[] | null;
+  restaurantLogo?: string | null;
   rating: string | number;
   ratingCount: number;
   services: string;
@@ -232,6 +234,9 @@ let featuredCache: Restaurant[] | null = null;
 /** Map a main (hotel) restaurant to the frontend shape. */
 function mapHotel(h: ApiHotel): Restaurant {
   const slug = `hotel-${h.id}`;
+  // Image keys, in priority order: coverImage -> first gallery image -> logo.
+  const image =
+    h.coverImage ?? h.images?.[0] ?? h.restaurantLogo ?? undefined;
   return {
     id: slug,
     slug,
@@ -254,7 +259,7 @@ function mapHotel(h: ApiHotel): Restaurant {
       .filter(Boolean),
     maxPartySize: 8,
     hue: hueFor(slug),
-    coverImage: h.coverImage ?? undefined,
+    coverImage: image,
   };
 }
 
@@ -455,10 +460,18 @@ export async function fetchRestaurants(
   if (filters.q) {
     extraP = searchHotels(filters.q, limit);
   } else {
-    const [lat, lng] = CITY_COORDS[filters.city ?? ""] ?? CITY_COORDS.Lagos;
+    // Browse: featured mains + nearby mains/scraped around every covered
+    // city (or just the filtered city), all in parallel.
+    const cities = filters.city ? [filters.city] : Object.keys(CITY_COORDS);
+    const nearbyP = Promise.all(
+      cities.map((c) => {
+        const [lat, lng] = CITY_COORDS[c] ?? CITY_COORDS.Lagos;
+        return fetchNearby(lat, lng).catch(() => [] as Restaurant[]);
+      }),
+    ).then((lists) => lists.flat());
     extraP = Promise.all([
       fetchFeatured().catch(() => [] as Restaurant[]),
-      fetchNearby(lat, lng).catch(() => [] as Restaurant[]),
+      nearbyP,
     ]).then(([featured, nearby]) => [...featured, ...nearby]);
   }
 

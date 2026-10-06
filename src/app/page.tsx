@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchFeatured, fetchRestaurants } from "@/lib/api";
 import type { Restaurant } from "@/lib/types";
 import { RestaurantCard } from "@/components/RestaurantCard";
@@ -10,16 +10,16 @@ import { track } from "@/lib/analytics";
 const CUISINES = ["All", "Nigerian", "Seafood", "Asian", "Italian", "Café", "Grill", "Turkish"];
 const CITIES = ["All cities", "Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"];
 const PAGE_SIZE = 20;
-const MAX_LIMIT = 100;
 
 export default function DiscoverPage() {
   const [query, setQuery] = useState("");
   const [cuisine, setCuisine] = useState("All");
   const [city, setCity] = useState("All cities");
-  const [limit, setLimit] = useState(PAGE_SIZE);
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [pool, setPool] = useState<Restaurant[]>([]);
+  const [visible, setVisible] = useState(PAGE_SIZE);
   const [featured, setFeatured] = useState<Restaurant[]>([]);
   const [loading, setLoading] = useState(true);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Debounce the search input so we don't hammer the API per keystroke.
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -27,11 +27,6 @@ export default function DiscoverPage() {
     const t = setTimeout(() => setDebouncedQuery(query.trim()), 350);
     return () => clearTimeout(t);
   }, [query]);
-
-  // Reset pagination whenever the filters change.
-  useEffect(() => {
-    setLimit(PAGE_SIZE);
-  }, [debouncedQuery, cuisine, city]);
 
   // Featured Anli partners — loaded once, shown above the listing.
   useEffect(() => {
@@ -44,18 +39,20 @@ export default function DiscoverPage() {
     };
   }, []);
 
-  // FR-01: directory listing — server-side search + "load more" pagination.
+  // FR-01: directory listing — the full merged pool is fetched once per
+  // filter change; infinite scroll reveals it in PAGE_SIZE chunks.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setVisible(PAGE_SIZE);
     fetchRestaurants({
       q: debouncedQuery || undefined,
       city: city === "All cities" ? undefined : city,
       cuisine: cuisine === "All" ? undefined : cuisine,
-      limit,
+      limit: 100,
     })
       .then((list) => {
-        if (!cancelled) setRestaurants(list);
+        if (!cancelled) setPool(list);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -63,15 +60,29 @@ export default function DiscoverPage() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, cuisine, city, limit]);
+  }, [debouncedQuery, cuisine, city]);
+
+  const restaurants = useMemo(() => pool.slice(0, visible), [pool, visible]);
+  const hasMore = visible < pool.length;
+
+  // Infinite scroll: reveal the next chunk when the sentinel scrolls in.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisible((v) => v + PAGE_SIZE);
+        }
+      },
+      { rootMargin: "600px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loading]);
 
   const hasActiveFilters =
     debouncedQuery !== "" || cuisine !== "All" || city !== "All cities";
-
-  // Hide the "show more" button when the last fetch returned fewer than
-  // the requested limit (end of catalogue) or we're at the API max.
-  const canLoadMore =
-    !loading && restaurants.length >= limit && limit < MAX_LIMIT;
 
   const clearFilters = useMemo(
     () => () => {
@@ -160,9 +171,9 @@ export default function DiscoverPage() {
         <h2 className="text-[17px] font-extrabold text-white">
           {hasActiveFilters ? "Results" : "Discover all"}
         </h2>
-        {!loading && restaurants.length > 0 && (
+        {!loading && pool.length > 0 && (
           <p className="text-[12px] text-stone-500">
-            {restaurants.length} spot{restaurants.length === 1 ? "" : "s"}
+            {pool.length} spot{pool.length === 1 ? "" : "s"}
           </p>
         )}
       </div>
@@ -203,24 +214,26 @@ export default function DiscoverPage() {
         )}
       </div>
 
-      {/* Pagination — keep discovering the catalogue */}
-      {canLoadMore && (
-        <div className="mt-6 text-center">
-          <button
-            onClick={() => setLimit((l) => Math.min(MAX_LIMIT, l + PAGE_SIZE))}
-            className="rounded-full border border-ink-600 bg-ink-900 px-6 py-3 text-[14px] font-bold text-stone-200"
-          >
-            Show more restaurants →
-          </button>
-          <p className="mt-2 text-[12px] text-stone-600">
-            Showing {restaurants.length} · scroll for more
-          </p>
+      {/* Infinite scroll sentinel — reveals the next chunk, then the end */}
+      {!loading && restaurants.length > 0 && hasMore && (
+        <div ref={sentinelRef} className="mt-6 flex justify-center py-4">
+          <div className="flex items-center gap-2 text-[13px] text-stone-500">
+            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-ink-600 border-t-brand-400" aria-hidden />
+            Loading more spots…
+          </div>
         </div>
       )}
-
-      <p className="mt-6 text-center text-[12px] text-stone-600">
-        Prices in NGN
-      </p>
+      {!loading && restaurants.length > 0 && !hasMore && (
+        <p className="mt-6 text-center text-[12px] text-stone-600">
+          You&apos;ve seen all {pool.length} spot{pool.length === 1 ? "" : "s"} ·
+          Prices in NGN
+        </p>
+      )}
+      {(loading || restaurants.length === 0) && (
+        <p className="mt-6 text-center text-[12px] text-stone-600">
+          Prices in NGN
+        </p>
+      )}
       <div className="h-6" />
     </div>
   );
