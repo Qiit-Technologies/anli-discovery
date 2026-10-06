@@ -16,7 +16,10 @@ export default async function RestaurantPage({
   if (!restaurant) notFound();
 
   // FR-02: claim-status check is the fork point for the booking module.
+  // Main (hotel) restaurants aren't in the discovery table, so like featured
+  // partners they get the showcase panel instead of the booking module.
   const live = isLiveBookable(restaurant);
+  const showcase = restaurant.featured || restaurant.slug.startsWith("hotel-");
 
   return (
     <div>
@@ -56,7 +59,7 @@ export default async function RestaurantPage({
           )}
         </div>
         <div className="absolute bottom-4 left-4">
-          {restaurant.featured ? (
+          {showcase ? (
             <span className="rounded-full bg-amber-400 px-3 py-1.5 text-[12px] font-extrabold text-ink-950">
               ★ Featured Anli partner
             </span>
@@ -121,10 +124,10 @@ export default async function RestaurantPage({
           </p>
         </div>
 
-        {/* Booking module — featured partners get a showcase panel;
+        {/* Booking module — main/featured partners get a showcase panel;
             discovery listings fork on claim status (FR-02, BR-01) */}
         <div className="mt-6 rounded-3xl border border-ink-700 bg-ink-900 p-5">
-          {restaurant.featured ? (
+          {showcase ? (
             <>
               <div className="flex items-center gap-2">
                 <span className="text-amber-300">★</span>

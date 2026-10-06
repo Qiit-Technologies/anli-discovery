@@ -229,6 +229,117 @@ function mapBookingRequest(b: ApiBookingRequest): BookingRequest {
 /** In-memory cache of featured partners so detail pages resolve them. */
 let featuredCache: Restaurant[] | null = null;
 
+/** Map a main (hotel) restaurant to the frontend shape. */
+function mapHotel(h: ApiHotel): Restaurant {
+  const slug = `hotel-${h.id}`;
+  return {
+    id: slug,
+    slug,
+    name: h.name,
+    cuisine: "Restaurant",
+    area: h.state || "",
+    city: h.city as Restaurant["city"],
+    claimStatus: "claimed" as const,
+    opsSetupComplete: true,
+    priceTier: 2 as const,
+    priceRangeKobo: [0, 0] as [number, number],
+    rating: Number(h.rating) || 0,
+    reviewCount: h.ratingCount ?? 0,
+    address: h.address ?? "",
+    hours: "",
+    description: "",
+    tags: (h.services ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
+    maxPartySize: 8,
+    hue: hueFor(slug),
+    coverImage: h.coverImage ?? undefined,
+  };
+}
+
+/** City centroids for the nearby endpoint. */
+const CITY_COORDS: Record<string, [number, number]> = {
+  Lagos: [6.5244, 3.3792],
+  Abuja: [9.0579, 7.4951],
+  "Port Harcourt": [4.8156, 7.0498],
+  Kano: [12.0022, 8.592],
+  Ibadan: [7.3775, 3.947],
+};
+
+/**
+ * Nearby mains + scraped — GET /hotels/mobile/search?lat=&lng= (public).
+ * Returns a bare array mixing Hotel entities and normalized scraped
+ * entries (flagged isScraped).
+ */
+async function fetchNearby(
+  lat: number,
+  lng: number,
+): Promise<Restaurant[]> {
+  if (!apiEnabled()) return [];
+  try {
+    const list = await req<
+      Array<ApiHotel & Partial<ApiScrapedEntry> & { isScraped?: boolean }>
+    >(`/hotels/mobile/search?lat=${lat}&lng=${lng}`);
+    return (list ?? []).map((e) =>
+      e.isScraped ? mapScraped(e as ApiScrapedEntry) : mapHotel(e as ApiHotel),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Full hotel-side search — GET /hotels/mobile/search?q= (public).
+ * Returns { hotels, total } mixing mains and scraped (isScraped flag).
+ */
+async function searchHotels(q: string, limit = 20): Promise<Restaurant[]> {
+  if (!apiEnabled() || !q.trim()) return [];
+  try {
+    const data = await req<{
+      hotels: Array<ApiHotel & Partial<ApiScrapedEntry> & { isScraped?: boolean }>;
+      total: number;
+    }>(
+      `/hotels/mobile/search?q=${encodeURIComponent(q.trim())}&limit=${Math.min(50, Math.max(1, limit))}`,
+    );
+    return (data.hotels ?? []).map((e) =>
+      e.isScraped ? mapScraped(e as ApiScrapedEntry) : mapHotel(e as ApiHotel),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Scraped detail — GET /hotels/scraped-restaurants/:id (public). */
+async function fetchScrapedDetail(
+  numericId: number,
+): Promise<Restaurant | undefined> {
+  if (!apiEnabled()) return undefined;
+  try {
+    const entry = await req<ApiScrapedEntry>(
+      `/hotels/scraped-restaurants/${numericId}`,
+    );
+    if (!entry || !entry.id) return undefined;
+    return mapScraped(entry);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Main restaurant detail — GET /hotels/hotel/:id (public). */
+async function fetchHotelDetail(
+  numericId: number,
+): Promise<Restaurant | undefined> {
+  if (!apiEnabled()) return undefined;
+  try {
+    const h = await req<ApiHotel>(`/hotels/hotel/${numericId}`);
+    if (!h || !h.id) return undefined;
+    return mapHotel(h);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Featured Anli partner restaurants — GET /hotels/mobile/featured.
  * These are main (claimed) restaurants; they render as a showcase section
@@ -243,31 +354,7 @@ export async function fetchFeatured(): Promise<Restaurant[]> {
   }
   try {
     const hotels = await req<ApiHotel[]>(`/hotels/mobile/featured`);
-    featuredCache = hotels.map((h) => ({
-      id: `hotel-${h.id}`,
-      slug: `hotel-${h.id}`,
-      name: h.name,
-      cuisine: "Restaurant",
-      area: h.state || "",
-      city: h.city as Restaurant["city"],
-      claimStatus: "claimed" as const,
-      opsSetupComplete: true,
-      priceTier: 2 as const,
-      priceRangeKobo: [0, 0] as [number, number],
-      rating: Number(h.rating) || 0,
-      reviewCount: h.ratingCount ?? 0,
-      address: h.address ?? "",
-      hours: "",
-      description: "",
-      tags: (h.services ?? "")
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean),
-      maxPartySize: 8,
-      hue: hueFor(`hotel-${h.id}`),
-      featured: true,
-      coverImage: h.coverImage ?? undefined,
-    }));
+    featuredCache = hotels.map((h) => ({ ...mapHotel(h), featured: true }));
   } catch {
     featuredCache = [];
   }
@@ -318,42 +405,6 @@ function mapScraped(e: ApiScrapedEntry): Restaurant {
   };
 }
 
-/**
- * Scraped restaurant search — GET /hotels/mobile/search (public).
- * Returns main + scraped merged; we keep only the isScraped entries
- * (main hotels are covered by discovery/featured already).
- */
-export async function searchScraped(
-  q: string,
-  limit = 20,
-): Promise<Restaurant[]> {
-  if (!apiEnabled() || !q.trim()) return [];
-  try {
-    const data = await req<{ hotels: ApiScrapedEntry[]; total: number }>(
-      `/hotels/mobile/search?q=${encodeURIComponent(q.trim())}&limit=${Math.min(50, Math.max(1, limit))}`,
-    );
-    return (data.hotels ?? []).filter((h) => h.isScraped).map(mapScraped);
-  } catch {
-    return [];
-  }
-}
-
-/** Scraped restaurant detail — GET /hotels/scraped-restaurants/:id (public). */
-export async function fetchScrapedDetail(
-  numericId: number,
-): Promise<Restaurant | undefined> {
-  if (!apiEnabled()) return undefined;
-  try {
-    const entry = await req<ApiScrapedEntry>(
-      `/hotels/scraped-restaurants/${numericId}`,
-    );
-    if (!entry || !entry.id) return undefined;
-    return mapScraped(entry);
-  } catch {
-    return undefined;
-  }
-}
-
 function filterMock(filters: RestaurantFilters): Restaurant[] {
   const q = (filters.q ?? "").trim().toLowerCase();
   const limit = filters.limit ?? 100;
@@ -375,50 +426,59 @@ function filterMock(filters: RestaurantFilters): Restaurant[] {
 }
 
 /**
- * FR-01: directory listing with server-side search + pagination.
- * Falls back to the bundled mock list when the API is unreachable or
- * returns nothing for an unfiltered browse.
+ * FR-01: full catalogue — aggregates EVERY live source:
+ *  1. /discovery/restaurants (Anli discovery catalogue)
+ *  2. /hotels/mobile/featured (Anli main/partner restaurants)
+ *  3. /hotels/mobile/search?lat=&lng= (nearby mains + scraped)
+ *  4. /hotels/mobile/search?q= (mains + scraped, when searching)
+ * De-duplicated by name; bundled mock data is the offline fallback.
  */
 export async function fetchRestaurants(
   filters: RestaurantFilters = {},
 ): Promise<Restaurant[]> {
   if (!apiEnabled()) return filterMock(filters);
+
+  const limit = Math.min(100, Math.max(1, filters.limit ?? 20));
   const params = new URLSearchParams();
   if (filters.q) params.set("q", filters.q);
   if (filters.city) params.set("city", filters.city);
   if (filters.cuisine) params.set("cuisine", filters.cuisine);
-  params.set("limit", String(Math.min(100, Math.max(1, filters.limit ?? 20))));
-  const qs = params.toString();
-  try {
-    const list = await req<ApiRestaurant[]>(`/discovery/restaurants?${qs}`);
-    const mapped = list.map(mapRestaurant);
-    // When searching, also pull aggregated (scraped) restaurants from the
-    // real backend endpoint and merge them in, de-duplicated by name.
-    if (filters.q && apiEnabled()) {
-      const scraped = await searchScraped(filters.q, filters.limit ?? 20);
-      const seen = new Set(mapped.map((r) => r.name.toLowerCase().trim()));
-      for (const s of scraped) {
-        const key = s.name.toLowerCase().trim();
-        if (!seen.has(key)) {
-          seen.add(key);
-          mapped.push(s);
-        }
-      }
+  params.set("limit", String(limit));
+
+  // 1) Discovery catalogue (never throws — falls back to [] per-source).
+  const discoveryP = req<ApiRestaurant[]>(`/discovery/restaurants?${params}`)
+    .then((list) => list.map(mapRestaurant))
+    .catch(() => [] as Restaurant[]);
+
+  // 2-4) Hotel-side sources.
+  let extraP: Promise<Restaurant[]> = Promise.resolve([]);
+  if (filters.q) {
+    extraP = searchHotels(filters.q, limit);
+  } else {
+    const [lat, lng] = CITY_COORDS[filters.city ?? ""] ?? CITY_COORDS.Lagos;
+    extraP = Promise.all([
+      fetchFeatured().catch(() => [] as Restaurant[]),
+      fetchNearby(lat, lng).catch(() => [] as Restaurant[]),
+    ]).then(([featured, nearby]) => [...featured, ...nearby]);
+  }
+
+  const [discoveries, extras] = await Promise.all([discoveryP, extraP]);
+
+  const merged = [...discoveries];
+  const seen = new Set(merged.map((r) => r.name.toLowerCase().trim()));
+  for (const r of extras) {
+    const key = r.name.toLowerCase().trim();
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(r);
     }
-    // Unfiltered browse against an empty table: show the bundled catalogue
-    // instead of a blank page.
-    if (
-      mapped.length === 0 &&
-      !filters.q &&
-      !filters.cuisine &&
-      !filters.city
-    ) {
-      return filterMock(filters);
-    }
-    return mapped;
-  } catch {
+  }
+
+  // Unfiltered browse with nothing live anywhere: bundled catalogue.
+  if (merged.length === 0 && !filters.q && !filters.cuisine && !filters.city) {
     return filterMock(filters);
   }
+  return merged;
 }
 
 /** FR-02: listing detail incl. claim status (featured partners via cache). */
@@ -430,6 +490,16 @@ export async function fetchRestaurant(
   if (scrapedMatch) {
     return (
       (await fetchScrapedDetail(parseInt(scrapedMatch[1], 10))) ??
+      mockGetRestaurant(slug)
+    );
+  }
+  // Main (hotel) restaurants resolve via the public hotel endpoint,
+  // falling back to the featured cache.
+  const hotelMatch = /^hotel-(\d+)$/.exec(slug);
+  if (hotelMatch) {
+    return (
+      (await fetchHotelDetail(parseInt(hotelMatch[1], 10))) ??
+      (await fetchFeatured()).find((r) => r.slug === slug) ??
       mockGetRestaurant(slug)
     );
   }
