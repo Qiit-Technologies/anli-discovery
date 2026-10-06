@@ -275,20 +275,26 @@ const CITY_COORDS: Record<string, [number, number]> = {
 /**
  * Nearby mains + scraped — GET /hotels/mobile/search?lat=&lng= (public).
  * Returns a bare array mixing Hotel entities and normalized scraped
- * entries (flagged isScraped).
+ * entries (flagged isScraped). stampCity fills in the city for entries
+ * the endpoint leaves blank (scraped), so location filters keep them.
  */
 async function fetchNearby(
   lat: number,
   lng: number,
+  stampCity?: string,
 ): Promise<Restaurant[]> {
   if (!apiEnabled()) return [];
   try {
     const list = await req<
       Array<ApiHotel & Partial<ApiScrapedEntry> & { isScraped?: boolean }>
     >(`/hotels/mobile/search?lat=${lat}&lng=${lng}`);
-    return (list ?? []).map((e) =>
-      e.isScraped ? mapScraped(e as ApiScrapedEntry) : mapHotel(e as ApiHotel),
-    );
+    return (list ?? []).map((e) => {
+      const r = e.isScraped
+        ? mapScraped(e as ApiScrapedEntry)
+        : mapHotel(e as ApiHotel);
+      if (stampCity && !r.city) r.city = stampCity as Restaurant["city"];
+      return r;
+    });
   } catch {
     return [];
   }
@@ -371,6 +377,9 @@ export interface RestaurantFilters {
   city?: string;
   cuisine?: string;
   limit?: number;
+  /** Precise coords ("Near me") — overrides city centroids for nearby. */
+  lat?: number;
+  lng?: number;
 }
 
 /** Map a backend scraped entry to the frontend Restaurant shape. */
@@ -459,6 +468,12 @@ export async function fetchRestaurants(
   let extraP: Promise<Restaurant[]> = Promise.resolve([]);
   if (filters.q) {
     extraP = searchHotels(filters.q, limit);
+  } else if (filters.lat != null && filters.lng != null) {
+    // "Near me": one nearby call at the user's real coords.
+    extraP = Promise.all([
+      fetchFeatured().catch(() => [] as Restaurant[]),
+      fetchNearby(filters.lat, filters.lng).catch(() => [] as Restaurant[]),
+    ]).then(([featured, nearby]) => [...featured, ...nearby]);
   } else {
     // Browse: featured mains + nearby mains/scraped around every covered
     // city (or just the filtered city), all in parallel.
@@ -466,7 +481,7 @@ export async function fetchRestaurants(
     const nearbyP = Promise.all(
       cities.map((c) => {
         const [lat, lng] = CITY_COORDS[c] ?? CITY_COORDS.Lagos;
-        return fetchNearby(lat, lng).catch(() => [] as Restaurant[]);
+        return fetchNearby(lat, lng, c).catch(() => [] as Restaurant[]);
       }),
     ).then((lists) => lists.flat());
     extraP = Promise.all([
@@ -487,11 +502,27 @@ export async function fetchRestaurants(
     }
   }
 
+  // The discovery API filters city/cuisine server-side; apply the same
+  // filters client-side so featured/nearby/scraped entries obey them too.
+  let result = merged;
+  if (filters.city) {
+    const c = filters.city.toLowerCase();
+    result = result.filter((r) => (r.city || "").toLowerCase() === c);
+  }
+  if (filters.cuisine && filters.cuisine !== "All") {
+    const q = filters.cuisine.toLowerCase();
+    result = result.filter(
+      (r) =>
+        r.cuisine.toLowerCase().includes(q) ||
+        r.tags.some((t) => t.toLowerCase().includes(q)),
+    );
+  }
+
   // Unfiltered browse with nothing live anywhere: bundled catalogue.
-  if (merged.length === 0 && !filters.q && !filters.cuisine && !filters.city) {
+  if (result.length === 0 && !filters.q && !filters.cuisine && !filters.city) {
     return filterMock(filters);
   }
-  return merged;
+  return result;
 }
 
 /** FR-02: listing detail incl. claim status (featured partners via cache). */

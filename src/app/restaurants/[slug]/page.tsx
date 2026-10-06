@@ -22,9 +22,9 @@ export default async function RestaurantPage({
   const showcase = restaurant.featured || restaurant.slug.startsWith("hotel-");
 
   return (
-    <div>
+    <div className="mx-auto w-full max-w-3xl lg:max-w-5xl">
       {/* Cover */}
-      <div className="relative h-56 overflow-hidden">
+      <div className="relative h-56 overflow-hidden sm:rounded-b-3xl lg:h-80">
         {restaurant.coverImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -69,7 +69,9 @@ export default async function RestaurantPage({
         </div>
       </div>
 
-      <div className="px-4 pt-4">
+      {/* Info + booking — two columns on desktop, booking sticky */}
+      <div className="px-4 pt-4 lg:grid lg:grid-cols-[1fr_360px] lg:items-start lg:gap-8 lg:px-6">
+        <div>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-[24px] font-extrabold tracking-tight text-white">
@@ -123,10 +125,11 @@ export default async function RestaurantPage({
             {restaurant.address}
           </p>
         </div>
+        </div>
 
         {/* Booking module — main/featured partners get a showcase panel;
             discovery listings fork on claim status (FR-02, BR-01) */}
-        <div className="mt-6 rounded-3xl border border-ink-700 bg-ink-900 p-5">
+        <div className="mt-6 rounded-3xl border border-ink-700 bg-ink-900 p-5 lg:sticky lg:top-24 lg:mt-4">
           {showcase ? (
             <>
               <div className="flex items-center gap-2">

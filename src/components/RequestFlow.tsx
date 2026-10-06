@@ -74,7 +74,7 @@ export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
     : null;
 
   return (
-    <div className="px-4 pt-5">
+    <div className="mx-auto w-full max-w-2xl px-4 pt-5">
       <Link
         href={`/restaurants/${restaurant.slug}`}
         className="text-[14px] font-medium text-stone-400"

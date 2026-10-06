@@ -122,7 +122,7 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
   const stepIndex = phase === "pick" ? 0 : phase === "details" ? 1 : 2;
 
   return (
-    <div className="px-4 pt-5">
+    <div className="mx-auto w-full max-w-2xl px-4 pt-5">
       <Link
         href={`/restaurants/${restaurant.slug}`}
         className="text-[14px] font-medium text-stone-400"

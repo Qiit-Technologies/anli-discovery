@@ -6,15 +6,16 @@ import type { Restaurant } from "@/lib/types";
 import { RestaurantCard } from "@/components/RestaurantCard";
 import { FeaturedCard } from "@/components/FeaturedCard";
 import { track } from "@/lib/analytics";
+import { useLocation } from "@/lib/location";
 
 const CUISINES = ["All", "Nigerian", "Seafood", "Asian", "Italian", "Café", "Grill", "Turkish"];
-const CITIES = ["All cities", "Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"];
+const CITIES = ["Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"];
 const PAGE_SIZE = 20;
 
 export default function DiscoverPage() {
+  const { location, setLocation, requestNearby, nearbyStatus } = useLocation();
   const [query, setQuery] = useState("");
   const [cuisine, setCuisine] = useState("All");
-  const [city, setCity] = useState("All cities");
   const [pool, setPool] = useState<Restaurant[]>([]);
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [featured, setFeatured] = useState<Restaurant[]>([]);
@@ -47,8 +48,10 @@ export default function DiscoverPage() {
     setVisible(PAGE_SIZE);
     fetchRestaurants({
       q: debouncedQuery || undefined,
-      city: city === "All cities" ? undefined : city,
+      city: location.kind === "city" ? location.city : undefined,
       cuisine: cuisine === "All" ? undefined : cuisine,
+      lat: location.kind === "nearby" ? location.lat : undefined,
+      lng: location.kind === "nearby" ? location.lng : undefined,
       limit: 100,
     })
       .then((list) => {
@@ -60,7 +63,7 @@ export default function DiscoverPage() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, cuisine, city]);
+  }, [debouncedQuery, cuisine, location]);
 
   const restaurants = useMemo(() => pool.slice(0, visible), [pool, visible]);
   const hasMore = visible < pool.length;
@@ -82,16 +85,23 @@ export default function DiscoverPage() {
   }, [hasMore, loading]);
 
   const hasActiveFilters =
-    debouncedQuery !== "" || cuisine !== "All" || city !== "All cities";
+    debouncedQuery !== "" || cuisine !== "All" || location.kind !== "all";
 
   const clearFilters = useMemo(
     () => () => {
       setQuery("");
       setCuisine("All");
-      setCity("All cities");
+      setLocation({ kind: "all" });
     },
-    [],
+    [setLocation],
   );
+
+  const activeCity =
+    location.kind === "city"
+      ? location.city
+      : location.kind === "nearby"
+        ? "__nearby"
+        : "__all";
 
   return (
     <div className="px-4 pt-5">
@@ -113,14 +123,34 @@ export default function DiscoverPage() {
         />
       </div>
 
-      {/* City select */}
+      {/* Location quick-pick */}
       <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+        <button
+          onClick={() => setLocation({ kind: "all" })}
+          className={`shrink-0 rounded-full px-4 py-2 text-[13px] font-semibold transition-colors ${
+            activeCity === "__all"
+              ? "bg-brand-500 text-white"
+              : "border border-ink-700 bg-ink-900 text-stone-400"
+          }`}
+        >
+          🌍 All
+        </button>
+        <button
+          onClick={requestNearby}
+          className={`shrink-0 rounded-full px-4 py-2 text-[13px] font-semibold transition-colors ${
+            activeCity === "__nearby"
+              ? "bg-brand-500 text-white"
+              : "border border-ink-700 bg-ink-900 text-stone-400"
+          }`}
+        >
+          {nearbyStatus === "locating" ? "Locating…" : "📍 Near me"}
+        </button>
         {CITIES.map((c) => (
           <button
             key={c}
-            onClick={() => setCity(c)}
+            onClick={() => setLocation({ kind: "city", city: c })}
             className={`shrink-0 rounded-full px-4 py-2 text-[13px] font-semibold transition-colors ${
-              city === c
+              activeCity === c
                 ? "bg-brand-500 text-white"
                 : "border border-ink-700 bg-ink-900 text-stone-400"
             }`}
@@ -129,6 +159,12 @@ export default function DiscoverPage() {
           </button>
         ))}
       </div>
+      {nearbyStatus === "error" && (
+        <p className="mt-1 text-[12px] text-amber-400">
+          Couldn&apos;t get your location — check your browser permission and
+          try again.
+        </p>
+      )}
 
       {/* Cuisine chips */}
       <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto pb-1">
@@ -178,7 +214,8 @@ export default function DiscoverPage() {
         )}
       </div>
 
-      <div className="mt-3 flex flex-col gap-4">
+      {/* Results — responsive grid: 1 col mobile, 2 tablet, 3 desktop */}
+      <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {loading && restaurants.length === 0 ? (
           <div className="rounded-3xl border border-ink-800 bg-ink-900 px-6 py-12 text-center">
             <p className="text-[14px] text-stone-500">Finding spots…</p>
