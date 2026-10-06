@@ -10,8 +10,8 @@ const CITIES = ["Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"];
 
 const NAV = [
   { href: "/", icon: "🔍", label: "Discover" },
-  { href: "/#", icon: "🎟️", label: "Bookings" },
-  { href: "/#", icon: "👤", label: "Profile" },
+  { href: "/bookings", icon: "🎟️", label: "Bookings" },
+  { href: "/profile", icon: "👤", label: "Profile" },
 ];
 
 function LocationSheet({ onClose }: { onClose: () => void }) {

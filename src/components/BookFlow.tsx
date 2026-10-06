@@ -17,11 +17,14 @@ import { track } from "@/lib/analytics";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Stepper } from "@/components/ui/Stepper";
+import { displayName, useAuth } from "@/lib/auth";
+import { recordBooking } from "@/lib/mybookings";
 import type { AvailabilitySlot, Reservation, Restaurant } from "@/lib/types";
 
 type Phase = "pick" | "details" | "hold" | "done" | "failed";
 
 export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
+  const { user } = useAuth();
   const [date, setDate] = useState(nextDays()[0]);
   const [party, setParty] = useState(2);
   const [slot, setSlot] = useState<AvailabilitySlot | null>(null);
@@ -32,6 +35,17 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
   const [phase, setPhase] = useState<Phase>("pick");
   const [failReason, setFailReason] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(5 * 60);
+
+  // Prefill diner details from the signed-in profile (once).
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (user && !prefilled) {
+      const n = displayName(user);
+      if (n && !name) setName(n);
+      if (user.phoneNumber && !contact) setContact(user.phoneNumber);
+      setPrefilled(true);
+    }
+  }, [user, prefilled, name, contact]);
 
   const days = useMemo(() => nextDays(14), []);
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
@@ -87,6 +101,7 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
         date,
         time: slot.time,
         partySize: party,
+        customerId: user ? String(user.id) : undefined,
       });
       setReservation(res);
       setSecondsLeft(5 * 60);
@@ -108,6 +123,18 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
     if (result.ok) {
       setReservation(result.reservation);
       setPhase("done");
+      // Save to My bookings + award loyalty points (device-local for now).
+      recordBooking({
+        ref: result.reservation.id,
+        userId: user ? String(user.id) : "guest",
+        kind: "reservation",
+        restaurantId: restaurant.id,
+        restaurantSlug: restaurant.slug,
+        restaurantName: restaurant.name,
+        date,
+        time: slot?.time ?? "",
+        partySize: party,
+      });
       track("booking_confirmed", {
         restaurant_id: restaurant.id,
         datetime: `${date} ${slot?.time}`,
@@ -359,7 +386,22 @@ export function BookFlow({ restaurant }: { restaurant: Restaurant }) {
             Booking ref {reservation.id.toUpperCase()} · confirmation sent to{" "}
             {reservation.dinerContact}
           </p>
-          <div className="mt-6">
+          <p className="mt-2 text-[13px] font-semibold text-amber-300">
+            +100 Anli points earned 🎉
+          </p>
+          <div className="mt-6 flex flex-col gap-2">
+            <Link href="/bookings">
+              <Button fullWidth variant="secondary">
+                View my bookings
+              </Button>
+            </Link>
+            {!user && (
+              <Link href="/login">
+                <Button fullWidth variant="secondary">
+                  Sign in to keep your points
+                </Button>
+              </Link>
+            )}
             <Link href="/">
               <Button fullWidth variant="secondary">
                 Back to discovery

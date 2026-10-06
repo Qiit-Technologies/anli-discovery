@@ -604,6 +604,8 @@ export interface HoldInput {
   date: string;
   time: string;
   partySize: number;
+  /** Customer id — links the booking to the loyalty account server-side. */
+  customerId?: string;
 }
 
 /** FR-05: place a short-TTL hold on a slot. */
@@ -654,6 +656,8 @@ export interface BookingRequestInput {
   /** ISO datetime of the requested seating */
   requestedAt: string;
   partySize: number;
+  /** Customer id — links the request to the loyalty account server-side. */
+  customerId?: string;
 }
 
 /** FR-08–FR-11: Path B booking request at an unclaimed restaurant. */
@@ -721,4 +725,213 @@ export async function createBookingRequest(
 export function getLocalRequestCount(restaurantId: string): number {
   if (apiEnabled()) return 0;
   return mockGetRequestsFor(restaurantId).length;
+}
+
+/* ---------------- Claim flow ---------------- */
+
+export interface ClaimInput {
+  claimantName: string;
+  claimantPhone: string;
+  claimantEmail: string;
+  role: "owner" | "manager" | "staff" | "other";
+  message?: string;
+}
+
+export interface ClaimSubmission {
+  id: number;
+  message: string;
+}
+
+/** Submit a claim for a listing — sends an OTP to the claimant's email. */
+export async function submitClaim(
+  slug: string,
+  input: ClaimInput,
+): Promise<ClaimSubmission> {
+  const res = await req<ClaimSubmission>(
+    `/discovery/restaurants/${encodeURIComponent(slug)}/claim`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return res;
+}
+
+/** Verify the emailed OTP for a claim request. */
+export async function verifyClaimOtp(
+  claimId: number,
+  otp: string,
+): Promise<{ verified: boolean }> {
+  return req<{ verified: boolean }>(
+    `/discovery/claim-requests/${claimId}/verify-otp`,
+    { method: "POST", body: JSON.stringify({ otp }) },
+  );
+}
+
+/** Re-send the claim OTP. */
+export async function resendClaimOtp(
+  claimId: number,
+): Promise<{ message: string }> {
+  return req<{ message: string }>(
+    `/discovery/claim-requests/${claimId}/resend-otp`,
+    { method: "POST" },
+  );
+}
+
+/* ---------------- Reviews ---------------- */
+
+export interface Review {
+  id: number;
+  reviewerName: string;
+  rating: number;
+  title: string | null;
+  body: string;
+  visitDate: string | null;
+  response: string | null;
+  respondedAt: string | null;
+  createdAt: string;
+}
+
+export interface ReviewAggregate {
+  average: number;
+  count: number;
+  distribution: Record<number, number>;
+}
+
+export interface ReviewsResponse {
+  data: Review[];
+  total: number;
+  page: number;
+  aggregate: ReviewAggregate;
+}
+
+export interface CreateReviewInput {
+  rating: number;
+  reviewerName: string;
+  title?: string;
+  body: string;
+  visitDate?: string;
+  customerId?: string;
+}
+
+/** Public: published reviews + aggregate for a listing. */
+export async function listReviews(
+  slug: string,
+  page = 1,
+): Promise<ReviewsResponse | null> {
+  if (!apiEnabled()) return null;
+  try {
+    return await req<ReviewsResponse>(
+      `/discovery/restaurants/${encodeURIComponent(slug)}/reviews?page=${page}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Public: submit a review. */
+export async function createReview(
+  slug: string,
+  input: CreateReviewInput,
+): Promise<Review> {
+  const res = await req<Review>(
+    `/discovery/restaurants/${encodeURIComponent(slug)}/reviews`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return res;
+}
+
+/* ---------------- Hotel (table-reservations) bookings ---------------- */
+
+export interface HotelBookingInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** HH:MM */
+  time: string;
+  guestNumber: number;
+  tableType: string;
+  reservationType: string;
+  /** customers.id — links the reservation + awards loyalty server-side */
+  customerId?: string;
+}
+
+export interface HotelReservation {
+  id: number;
+  firstName: string;
+  lastName: string;
+  date: string;
+  time: string;
+  guestNumber: number;
+  status?: string;
+}
+
+/**
+ * Real reservation in the hotel's Anli dashboard
+ * (POST /table-reservations/public/:hotelId).
+ */
+export async function createHotelBooking(
+  hotelId: number,
+  input: HotelBookingInput,
+): Promise<HotelReservation> {
+  return req<HotelReservation>(`/table-reservations/public/${hotelId}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export interface CustomerReservation {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  date: string;
+  time: string;
+  guestNumber: number;
+  status: string;
+  createdAt: string;
+  hotel?: { id: number; name: string };
+}
+
+/** Real backend bookings for a signed-in customer. */
+export async function fetchCustomerReservations(
+  customerId: string,
+): Promise<CustomerReservation[]> {
+  if (!apiEnabled()) return [];
+  try {
+    return await req<CustomerReservation[]>(
+      `/table-reservations/public/customer/${encodeURIComponent(customerId)}`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Cancel a backend reservation (customer JWT required).
+ * PATCH /table-reservations/public/:id
+ */
+export async function cancelHotelBooking(
+  reservationId: number,
+  token: string,
+): Promise<void> {
+  const base = (process.env.NEXT_PUBLIC_DISCOVERY_API_URL ?? "").replace(
+    /\/$/,
+    "",
+  );
+  const res = await fetch(
+    `${base}/table-reservations/public/${reservationId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ status: "CANCELLED" }),
+    },
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || "Could not cancel the reservation.");
+  }
 }

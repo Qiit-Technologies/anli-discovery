@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   createBookingRequest,
@@ -11,11 +11,14 @@ import { track } from "@/lib/analytics";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Stepper } from "@/components/ui/Stepper";
+import { displayName, useAuth } from "@/lib/auth";
+import { recordBooking } from "@/lib/mybookings";
 import type { BookingRequest, Restaurant } from "@/lib/types";
 
 type Phase = "form" | "done";
 
 export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
+  const { user } = useAuth();
   const [date, setDate] = useState(nextDays()[0]);
   const [time, setTime] = useState("19:00");
   const [party, setParty] = useState(2);
@@ -26,6 +29,17 @@ export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
   const [phase, setPhase] = useState<Phase>("form");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  // Prefill diner details from the signed-in profile (once).
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (user && !prefilled) {
+      const n = displayName(user);
+      if (n && !name) setName(n);
+      if (user.phoneNumber && !contact) setContact(user.phoneNumber);
+      setPrefilled(true);
+    }
+  }, [user, prefilled, name, contact]);
 
   const days = nextDays(14);
   const times = ["12:00", "13:00", "14:00", "18:00", "19:00", "20:00", "21:00"];
@@ -48,9 +62,22 @@ export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
         dinerContact: contact.trim(),
         requestedAt: `${date}T${time}:00`,
         partySize: party,
+        customerId: user ? String(user.id) : undefined,
       });
       setSaved(req);
       setPhase("done");
+      // Save to My bookings + award loyalty points (device-local for now).
+      recordBooking({
+        ref: req.id,
+        userId: user ? String(user.id) : "guest",
+        kind: "request",
+        restaurantId: restaurant.id,
+        restaurantSlug: restaurant.slug,
+        restaurantName: restaurant.name,
+        date,
+        time,
+        partySize: party,
+      });
       // FR-11: logged for the Sales/Growth pipeline; FR-12: restaurant notified
       track("booking_request_submitted", {
         restaurant_id: restaurant.id,
@@ -226,6 +253,9 @@ export function RequestFlow({ restaurant }: { restaurant: Restaurant }) {
             <p className="mt-3 rounded-xl bg-ink-850 p-3 text-[13px] font-medium text-amber-200/90">
               This is a request, not a confirmed table. Want certainty? Reach
               them directly:
+            </p>
+            <p className="mt-3 text-[13px] font-semibold text-amber-300">
+              +25 Anli points earned 🎉
             </p>
           </div>
 

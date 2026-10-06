@@ -5,6 +5,7 @@ import { isLiveBookable } from "@/lib/data";
 import { formatPriceRange, priceTierSymbols } from "@/lib/format";
 import { ClaimBadge, Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ReviewsSection } from "@/components/ReviewsSection";
 
 export default async function RestaurantPage({
   params,
@@ -16,10 +17,11 @@ export default async function RestaurantPage({
   if (!restaurant) notFound();
 
   // FR-02: claim-status check is the fork point for the booking module.
-  // Main (hotel) restaurants aren't in the discovery table, so like featured
-  // partners they get the showcase panel instead of the booking module.
+  // Main (hotel) restaurants book straight into the Anli dashboard's
+  // reservation module; featured partners stay showcase-only for now.
   const live = isLiveBookable(restaurant);
-  const showcase = restaurant.featured || restaurant.slug.startsWith("hotel-");
+  const isHotel = restaurant.slug.startsWith("hotel-");
+  const showcase = restaurant.featured && !isHotel;
 
   return (
     <div className="mx-auto w-full max-w-3xl lg:max-w-5xl">
@@ -130,7 +132,33 @@ export default async function RestaurantPage({
         {/* Booking module — main/featured partners get a showcase panel;
             discovery listings fork on claim status (FR-02, BR-01) */}
         <div className="mt-6 rounded-3xl border border-ink-700 bg-ink-900 p-5 lg:sticky lg:top-24 lg:mt-4">
-          {showcase ? (
+          {isHotel ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-amber-300">★</span>
+                <h2 className="text-[17px] font-bold text-white">
+                  An Anli partner restaurant
+                </h2>
+              </div>
+              <p className="mt-1.5 text-[14px] leading-6 text-stone-400">
+                {restaurant.name} runs on Anli — book a table and your
+                reservation goes straight into their booking diary.
+              </p>
+              <Link
+                href={`/restaurants/${restaurant.slug}/book`}
+                className="mt-4 block"
+              >
+                <Button fullWidth size="lg">
+                  Book a table →
+                </Button>
+              </Link>
+              {restaurant.address ? (
+                <p className="mt-3 text-[14px] font-semibold text-stone-200">
+                  📍 {restaurant.address}
+                </p>
+              ) : null}
+            </>
+          ) : showcase ? (
             <>
               <div className="flex items-center gap-2">
                 <span className="text-amber-300">★</span>
@@ -189,6 +217,35 @@ export default async function RestaurantPage({
             </>
           )}
         </div>
+
+        <div className="h-6" />
+
+        {/* Claim CTA — unclaimed discovery listings can be claimed */}
+        {!isHotel &&
+        !showcase &&
+        restaurant.claimStatus === "unclaimed" ? (
+          <div className="rounded-3xl border border-dashed border-ink-700 bg-ink-900/60 p-5">
+            <h2 className="text-[15px] font-bold text-white">
+              Own this business?
+            </h2>
+            <p className="mt-1 text-[13px] leading-5 text-stone-400">
+              Claim {restaurant.name} to verify your listing, appear as an
+              Anli partner, and manage bookings.
+            </p>
+            <Link
+              href={`/restaurants/${restaurant.slug}/claim`}
+              className="mt-3 block"
+            >
+              <Button fullWidth variant="secondary">
+                Claim this business →
+              </Button>
+            </Link>
+          </div>
+        ) : null}
+
+        <div className="h-6" />
+
+        <ReviewsSection slug={restaurant.slug} />
 
         <div className="h-6" />
       </div>
