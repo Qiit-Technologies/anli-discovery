@@ -29,6 +29,8 @@ export interface Restaurant {
   hue: number;
   /** True for main Anli partner restaurants (from /hotels/mobile/featured) */
   featured?: boolean;
+  /** True for aggregated (scraped) listings — cf. backend isScraped flag */
+  isScraped?: boolean;
   /** Cover photo URL when the backend provides one */
   coverImage?: string;
 }

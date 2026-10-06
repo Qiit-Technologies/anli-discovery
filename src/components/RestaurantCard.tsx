@@ -48,7 +48,9 @@ export function RestaurantCard({ restaurant }: { restaurant: Restaurant }) {
           </span>
         </div>
         <p className="mt-2 text-[13px] text-stone-500">
-          {formatPriceRange(restaurant.priceRangeKobo)} per person
+          {restaurant.priceRangeKobo[1] > 0
+            ? `${formatPriceRange(restaurant.priceRangeKobo)} per person`
+            : "Aggregated listing"}
         </p>
       </div>
     </Link>

@@ -100,6 +100,29 @@ interface ApiHotel {
   services: string;
 }
 
+interface ApiScrapedEntry {
+  id: number;
+  name: string;
+  address: string | null;
+  coverImage: string | null;
+  images: string[] | null;
+  rating: string | number | null;
+  ratingCount: number | null;
+  tags: string | null;
+  displayHours: string | null;
+  isBookable: boolean;
+  isScraped: boolean;
+  headline: string | null;
+  description: string | null;
+  website: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  city: string | null;
+  neighborhood: string | null;
+  priceLevel: string | null;
+  averageCostForTwo: string | number | null;
+}
+
 interface ApiAvailability {
   date: string;
   partySize: number;
@@ -258,6 +281,79 @@ export interface RestaurantFilters {
   limit?: number;
 }
 
+/** Map a backend scraped entry to the frontend Restaurant shape. */
+function mapScraped(e: ApiScrapedEntry): Restaurant {
+  const tags = (e.tags ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const tierFromLevel = (e.priceLevel ?? "").replace(/[^$]/g, "").length;
+  const slug = `scraped-${e.id}`;
+  return {
+    id: slug,
+    slug,
+    name: e.name || "Unnamed Restaurant",
+    cuisine: tags[0] ?? "Restaurant",
+    area: e.neighborhood ?? "",
+    city: (e.city ?? "") as Restaurant["city"],
+    claimStatus: "unclaimed",
+    opsSetupComplete: false,
+    isScraped: true,
+    priceTier: (tierFromLevel >= 3 ? 3 : tierFromLevel <= 1 ? 1 : 2) as
+      | 1
+      | 2
+      | 3,
+    priceRangeKobo: [0, 0],
+    rating: Number(e.rating ?? 4) || 4,
+    reviewCount: Number(e.ratingCount ?? 0),
+    phone: e.contactPhone ?? undefined,
+    whatsapp: e.contactPhone ?? undefined,
+    address: e.address ?? "",
+    hours: e.displayHours ?? "",
+    description: e.description ?? e.headline ?? "",
+    tags,
+    maxPartySize: 8,
+    hue: hueFor(slug),
+    coverImage: e.coverImage ?? e.images?.[0] ?? undefined,
+  };
+}
+
+/**
+ * Scraped restaurant search — GET /hotels/mobile/search (public).
+ * Returns main + scraped merged; we keep only the isScraped entries
+ * (main hotels are covered by discovery/featured already).
+ */
+export async function searchScraped(
+  q: string,
+  limit = 20,
+): Promise<Restaurant[]> {
+  if (!apiEnabled() || !q.trim()) return [];
+  try {
+    const data = await req<{ hotels: ApiScrapedEntry[]; total: number }>(
+      `/hotels/mobile/search?q=${encodeURIComponent(q.trim())}&limit=${Math.min(50, Math.max(1, limit))}`,
+    );
+    return (data.hotels ?? []).filter((h) => h.isScraped).map(mapScraped);
+  } catch {
+    return [];
+  }
+}
+
+/** Scraped restaurant detail — GET /hotels/scraped-restaurants/:id (public). */
+export async function fetchScrapedDetail(
+  numericId: number,
+): Promise<Restaurant | undefined> {
+  if (!apiEnabled()) return undefined;
+  try {
+    const entry = await req<ApiScrapedEntry>(
+      `/hotels/scraped-restaurants/${numericId}`,
+    );
+    if (!entry || !entry.id) return undefined;
+    return mapScraped(entry);
+  } catch {
+    return undefined;
+  }
+}
+
 function filterMock(filters: RestaurantFilters): Restaurant[] {
   const q = (filters.q ?? "").trim().toLowerCase();
   const limit = filters.limit ?? 100;
@@ -296,6 +392,19 @@ export async function fetchRestaurants(
   try {
     const list = await req<ApiRestaurant[]>(`/discovery/restaurants?${qs}`);
     const mapped = list.map(mapRestaurant);
+    // When searching, also pull aggregated (scraped) restaurants from the
+    // real backend endpoint and merge them in, de-duplicated by name.
+    if (filters.q && apiEnabled()) {
+      const scraped = await searchScraped(filters.q, filters.limit ?? 20);
+      const seen = new Set(mapped.map((r) => r.name.toLowerCase().trim()));
+      for (const s of scraped) {
+        const key = s.name.toLowerCase().trim();
+        if (!seen.has(key)) {
+          seen.add(key);
+          mapped.push(s);
+        }
+      }
+    }
     // Unfiltered browse against an empty table: show the bundled catalogue
     // instead of a blank page.
     if (
@@ -316,6 +425,14 @@ export async function fetchRestaurants(
 export async function fetchRestaurant(
   slug: string,
 ): Promise<Restaurant | undefined> {
+  // Scraped listings resolve through their own public endpoint.
+  const scrapedMatch = /^scraped-(\d+)$/.exec(slug);
+  if (scrapedMatch) {
+    return (
+      (await fetchScrapedDetail(parseInt(scrapedMatch[1], 10))) ??
+      mockGetRestaurant(slug)
+    );
+  }
   if (!apiEnabled()) {
     return (
       mockGetRestaurant(slug) ??
@@ -430,6 +547,45 @@ export async function createBookingRequest(
   restaurant: Restaurant,
   input: BookingRequestInput,
 ): Promise<BookingRequest> {
+  // Aggregated (scraped) listings go through the backend's own public
+  // reservation-request endpoint, which notifies the restaurant.
+  if (restaurant.isScraped && apiEnabled()) {
+    const numericId = parseInt(restaurant.slug.replace("scraped-", ""), 10);
+    if (!Number.isNaN(numericId)) {
+      try {
+        const looksEmail = /.+@.+\..+/.test(input.dinerContact);
+        await req<{ success: boolean; message: string }>(
+          `/hotels/scraped-restaurants/${numericId}/reservation`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              customerName: input.dinerName,
+              customerEmail: looksEmail ? input.dinerContact : "",
+              customerPhone: looksEmail ? "" : input.dinerContact,
+              date: input.requestedAt.slice(0, 10),
+              time: input.requestedAt.slice(11, 16),
+              guestCount: input.partySize,
+              reservationType: "ANLI Discovery",
+            }),
+          },
+        );
+        const now = new Date().toISOString();
+        return {
+          id: `scraped-req-${Date.now().toString(36)}`,
+          restaurantId: restaurant.id,
+          dinerName: input.dinerName,
+          dinerContact: input.dinerContact,
+          requestedAt: input.requestedAt,
+          partySize: input.partySize,
+          status: "open",
+          createdAt: now,
+        };
+      } catch (e) {
+        if (e instanceof ApiError) throw new Error(e.message);
+        // offline: fall through to the local mock store below
+      }
+    }
+  }
   if (!apiEnabled())
     return mockSaveBookingRequest({ restaurantId: restaurant.id, ...input });
   try {

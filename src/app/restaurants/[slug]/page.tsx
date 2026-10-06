@@ -101,7 +101,9 @@ export default async function RestaurantPage({
           <div className="rounded-2xl border border-ink-800 bg-ink-900 p-3.5">
             <p className="text-[12px] font-medium text-stone-500">Per person</p>
             <p className="mt-1 text-[15px] font-bold text-stone-100">
-              {formatPriceRange(restaurant.priceRangeKobo)}
+              {restaurant.priceRangeKobo[1] > 0
+                ? formatPriceRange(restaurant.priceRangeKobo)
+                : "—"}
             </p>
           </div>
           <div className="rounded-2xl border border-ink-800 bg-ink-900 p-3.5">
